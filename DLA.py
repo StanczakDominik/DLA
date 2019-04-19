@@ -62,14 +62,14 @@ class DLA2D:
             self.tree = cKDTree(self.particles)
             self.connections.append((N+1, neighbor_index))
 
-    def plot_mass_distribution(self):
+    def plot_mass_distribution(self, Rmin=0.1, Rmax=0.9):
         import matplotlib.pyplot as plt
         distances = np.linalg.norm(self.particles, axis=1)
         minimum = -2
         maximum = np.log(distances.max())
         span = maximum - minimum
-        R1 = np.exp(0.1 * span + minimum)
-        R2 = np.exp(0.9 * span + minimum)
+        R1 = np.exp(Rmin * span + minimum)
+        R2 = np.exp(Rmax * span + minimum)
         Rs = np.logspace(minimum, maximum, 1000)
         Ns = np.array([len(self.tree.query_ball_point(np.zeros(self.DIM), R)) for R in Rs])
         indices = (R1 < Rs) & (Rs < R2)
@@ -91,6 +91,7 @@ class DLA2D:
         lines = [(self.particles[par1], self.particles[par2]) for par1, par2 in self.connections]
         # x, y = np.vstack(self.particles).T
         # plt.scatter(x, y)
+        tqdm.write("Plotting...")
         for (x1, y1), (x2, y2) in tqdm(lines):
             plt.plot([x1, x2], [y1, y2]) 
         plt.grid()
@@ -125,9 +126,10 @@ class DLA3D(DLA2D):
     
     def plot_positions(self):
         from mayavi import mlab
+        tqdm.write("Plotting...")
         lines = [(self.particles[par1], self.particles[par2]) for par1, par2 in self.connections]
         x, y, z = np.vstack(self.particles).T
-        for (x1, y1, z1), (x2, y2, z2) in lines:
+        for (x1, y1, z1), (x2, y2, z2) in tqdm(lines):
             mlab.plot3d([x1, x2], [y1, y2], [z1, z2]) 
         mlab.show()
 
@@ -152,7 +154,9 @@ class MapDLA(DLA2D):
                 self.connections.append((N+1, neighbor_index))
 
 if __name__ == "__main__":
-    d = DLA3D()
-    d.make_fractal(int(1e5))
-    d.save("3d.json")
+    d = DLA2D.load("2d.json")
+    d.plot_positions()
     d.plot_mass_distribution()
+    d3 = DLA3D.load("3d.json")
+    d3.plot_mass_distribution(0.2, 0.8)
+    # d3.plot_positions()
