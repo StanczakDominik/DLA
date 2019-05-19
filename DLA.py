@@ -4,6 +4,7 @@ from tqdm import tqdm as tqdm
 import random
 from multiprocessing import Pool
 import json
+import os
 
 N_particles = 5000
 
@@ -11,17 +12,30 @@ N_particles = 5000
 class DLA2D:
     DIM = 2
     @classmethod
-    def displacement(cls, loc = 3, scale=1/10):
+    def displacement(cls, loc = 3, scale=1/10, center = (0, 0)):
         distance = np.abs(np.random.normal(loc=loc, scale=scale))
         theta= np.random.random()*2*np.pi
         x = np.cos(theta) * distance
         y = np.sin(theta) * distance
-        return np.array([x, y])
+        return np.array([x, y]) + np.array(center)
 
-    def __init__(self):
-        self.particles = [np.zeros(self.DIM)]
-        self.tree = cKDTree(self.particles)
+    def __init__(self, num_starters = 1,
+                 R = 0.3,
+                 Rmin = 1.2,
+                 Rmax = 30
+                 ):
+        self.num_starters = num_starters
         self.connections = []
+        self.R = R
+        self.Rmin = Rmin
+        self.Rmax = Rmax
+
+        if num_starters == 1:
+            self.particles = [np.zeros(self.DIM)]
+        else:
+            self.particles = list(np.random.normal(scale = num_starters * R * 5,
+                                                   size=(num_starters, self.DIM)))
+        self.tree = cKDTree(self.particles)
 
     def generate_particle(self):
         while True:
@@ -31,13 +45,14 @@ class DLA2D:
 
     def iterate_particle(self,
                          NT = 100000,
-                         R = 0.3,
-                         Rmin = 1.2,
-                         Rmax = 5
                          ):
         while True:
-            particle = self.displacement(loc=np.linalg.norm(self.particles, axis=1).max()*1.05, scale=1/2)
-            if not self.tree.query_ball_point(particle, Rmin):
+            particle = self.displacement(loc=np.linalg.norm(self.particles,
+                                                            axis=1).max()*1.05,
+                                         scale=1/2,
+                                         # center = np.mean(self.particles, axis=0),
+                                         )
+            if not self.tree.query_ball_point(particle, self.Rmin):
                 # make sure we're spawning far away from existing particles
                 break
 
@@ -45,9 +60,9 @@ class DLA2D:
             displaced_particle = particle + self.displacement()
             distance, neighbor_index = self.tree.query(displaced_particle, 1)
 
-            if distance < R:  # we have found a neighbour!
+            if distance < self.R:  # we have found a neighbour!
                 return displaced_particle, neighbor_index
-            elif distance > Rmax:  # Particle going too far!
+            elif distance > self.Rmax:  # Particle going too far!
                 return None
             else:  # run next iteration
                 particle = displaced_particle
@@ -60,7 +75,7 @@ class DLA2D:
             particle, neighbor_index = self.generate_particle()
             self.particles.append(particle)
             self.tree = cKDTree(self.particles)
-            self.connections.append((N+1, neighbor_index))
+            self.connections.append((N+self.num_starters, neighbor_index))
 
     def plot_mass_distribution(self, Rmin=0.1, Rmax=0.9):
         import matplotlib.pyplot as plt
@@ -88,25 +103,31 @@ class DLA2D:
 
     def plot_positions(self):
         import matplotlib.pyplot as plt
-        lines = [(self.particles[par1], self.particles[par2]) for par1, par2 in self.connections]
-        # x, y = np.vstack(self.particles).T
-        # plt.scatter(x, y)
+        x, y = np.vstack(self.particles).T
+        # plt.plot(x[self.num_starters:], y[self.num_starters:], "o")
         tqdm.write("Plotting...")
+        lines = [(self.particles[par1], self.particles[par2]) for par1, par2 in self.connections]
         for (x1, y1), (x2, y2) in tqdm(lines):
             plt.plot([x1, x2], [y1, y2]) 
+        plt.plot(x[:self.num_starters], y[:self.num_starters], "*", markersize=20)
         plt.grid()
         plt.show()
 
     def save(self, filename):
         with open(filename, "w") as f:
-            d = dict(particles=np.vstack(self.particles).tolist(), connections=self.connections)
+            d = dict(particles=np.vstack(self.particles).tolist(),
+                     connections=self.connections,
+                     num_starters = self.num_starters,
+                     R=self.R,
+                     Rmin=self.Rmin,
+                     Rmax=self.Rmax)
             json.dump(d, f)
 
     @classmethod
     def load(cls, filename):
         with open(filename, "r") as f:
             d = json.load(f)
-        dla = cls()
+        dla = cls(d['num_starters'], d['R'], d['Rmin'], d['Rmax'])
         dla.particles = np.array(d['particles'])
         dla.connections = d['connections']
         dla.tree = cKDTree(dla.particles)
@@ -153,10 +174,18 @@ class MapDLA(DLA2D):
                 self.tree = cKDTree(self.particles)
                 self.connections.append((N+1, neighbor_index))
 
+def create_fractal(n_starters = 2, n_particles = 5000):
+    filename = f"2d_{n_starters}_{n_particles}.json"
+    if os.path.isfile(filename):
+        tqdm.write("reading from file...")
+        d = DLA2D.load(filename)
+    else:
+        tqdm.write(f"Creating fractal {filename} from scratch")
+        d = DLA2D(n_starters)
+        d.make_fractal(n_particles)
+        d.save(filename)
+    return d
 if __name__ == "__main__":
-    d = DLA2D.load("2d.json")
-    d.plot_positions()
-    d.plot_mass_distribution()
-    d3 = DLA3D.load("3d.json")
-    d3.plot_mass_distribution(0.2, 0.8)
-    # d3.plot_positions()
+    for n_starters in range(2, 5):
+        d = create_fractal(n_starters, 50000)
+        # d.plot_positions()
