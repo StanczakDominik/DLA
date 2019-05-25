@@ -56,11 +56,12 @@ class DLA2D:
         while True:
             displaced_particle = particle + self.displacement()
             particle_radius = (displaced_particle**2).sum()**0.5
-            distance, neighbor_index = self.tree.query(displaced_particle, 1)
+            neighbors = self.tree.query_ball_point(displaced_particle, self.R)
 
-            if distance < self.R:  # we have found a neighbour!
+            if neighbors:
                 if self.max_distance < particle_radius:
                     self.max_distance = particle_radius
+                neighbor_index = neighbors = [0]
                 return displaced_particle, neighbor_index
 
             elif spawn_distance < particle_radius:
@@ -195,7 +196,7 @@ def create_fractal(n_starters = 2, n_particles = 5000, force_new = False,
     return d
 
 def main(plot = False):
-    d = create_fractal(1, int(5e3)+1,
+    d = create_fractal(1, int(5e3)+3,
                        R = 1/2,
                        # force_new = True,
                        )
