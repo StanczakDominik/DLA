@@ -11,16 +11,21 @@ import random
 
 N_particles = 5000
 
+dtype = np.float16
 
 class DLA2D:
     DIM = 2
     @classmethod
     def displacement(cls, loc = 1):
-        distance = loc
-        theta= random.random()*2*np.pi
-        x = math.cos(theta) * distance
-        y = math.sin(theta) * distance
-        return np.array([x, y], dtype=np.float16)
+        return np.random.normal(scale=loc, size=cls.DIM).astype(dtype)
+
+    @classmethod
+    def position_on_circle(cls, radius):
+        theta = random.random() * 2 * np.pi
+        x = math.cos(theta) * radius
+        y = math.sin(theta) * radius
+        particle = np.array([x, y], dtype=dtype)
+        return particle
 
     def __init__(self, num_starters = 1,
                  R = 1/20,
@@ -46,10 +51,7 @@ class DLA2D:
                          NT = 100000,
                          ):
         spawn_distance = self.max_distance + 5 
-        theta = random.random() * 2 * np.pi
-        x = math.cos(theta) * spawn_distance
-        y = math.sin(theta) * spawn_distance
-        particle = np.array([x, y], dtype=np.float16)
+        particle = self.position_on_circle(spawn_distance)
 
         while True:
             displaced_particle = particle + self.displacement()
@@ -60,11 +62,10 @@ class DLA2D:
                 if self.max_distance < particle_radius:
                     self.max_distance = particle_radius
                 return displaced_particle, neighbor_index
+
             elif spawn_distance < particle_radius:
-                theta = random.random() * 2 * np.pi
-                x = math.cos(theta) * spawn_distance
-                y = math.sin(theta) * spawn_distance
-                particle = np.array([x, y], dtype=np.float16)
+                particle = self.position_on_circle(spawn_distance)
+
             else:  # run next iteration
                 particle = displaced_particle
 
@@ -193,15 +194,16 @@ def create_fractal(n_starters = 2, n_particles = 5000, force_new = False,
         d.save(filename)
     return d
 
-def main():
-    d = create_fractal(1, int(4e4)+1,
+def main(plot = False):
+    d = create_fractal(1, int(5e3)+1,
                        R = 1/2,
                        # force_new = True,
                        )
-    d.plot_particles()
-    d.plot_mass_distribution(0.06, 0.6)
+    if plot:
+        d.plot_particles()
+        d.plot_mass_distribution(0.06, 0.6)
 
 if __name__ == "__main__":
-    main()
+    main(True)
 
 
