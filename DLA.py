@@ -1,10 +1,13 @@
 import numpy as np
 from scipy.spatial import cKDTree
-from tqdm import tqdm as tqdm
+import tqdm
 import random
 from multiprocessing import Pool
 import json
 import os
+import numba
+import math
+import random
 
 N_particles = 5000
 
@@ -12,15 +15,15 @@ N_particles = 5000
 class DLA2D:
     DIM = 2
     @classmethod
-    def displacement(cls, loc = 3, scale=1/10, center = (0, 0)):
-        distance = np.abs(np.random.normal(loc=loc, scale=scale))
-        theta= np.random.random()*2*np.pi
-        x = np.cos(theta) * distance
-        y = np.sin(theta) * distance
-        return np.array([x, y]) + np.array(center)
+    def displacement(cls, loc = 1):
+        distance = loc
+        theta= random.random()*2*np.pi
+        x = math.cos(theta) * distance
+        y = math.sin(theta) * distance
+        return np.array([x, y], dtype=np.float16)
 
     def __init__(self, num_starters = 1,
-                 R = 0.3,
+                 R = 1/20,
                  Rmin = 1.2,
                  Rmax = 30
                  ):
@@ -32,47 +35,42 @@ class DLA2D:
 
         if num_starters == 1:
             self.particles = [np.zeros(self.DIM)]
+            self.max_distance = 0
         else:
             self.particles = list(np.random.normal(scale = num_starters * R * 5,
                                                    size=(num_starters, self.DIM)))
+            self.max_distance = np.linalg.norm(self.particles, axis=1).max()
         self.tree = cKDTree(self.particles)
-
-    def generate_particle(self):
-        while True:
-            appended_particle = self.iterate_particle()
-            if appended_particle is not None:
-                return appended_particle
 
     def iterate_particle(self,
                          NT = 100000,
                          ):
-        while True:
-            particle = self.displacement(loc=np.linalg.norm(self.particles,
-                                                            axis=1).max()*1.05,
-                                         scale=1/2,
-                                         # center = np.mean(self.particles, axis=0),
-                                         )
-            if not self.tree.query_ball_point(particle, self.Rmin):
-                # make sure we're spawning far away from existing particles
-                break
+        spawn_distance = self.max_distance + 5 
+        theta = random.random() * 2 * np.pi
+        x = math.cos(theta) * spawn_distance
+        y = math.sin(theta) * spawn_distance
+        particle = np.array([x, y], dtype=np.float16)
 
-        for i in range(NT):
+        while True:
             displaced_particle = particle + self.displacement()
+            particle_radius = (displaced_particle**2).sum()**0.5
             distance, neighbor_index = self.tree.query(displaced_particle, 1)
 
             if distance < self.R:  # we have found a neighbour!
+                if self.max_distance < particle_radius:
+                    self.max_distance = particle_radius
                 return displaced_particle, neighbor_index
-            elif distance > self.Rmax:  # Particle going too far!
-                return None
+            elif spawn_distance < particle_radius:
+                theta = random.random() * 2 * np.pi
+                x = math.cos(theta) * spawn_distance
+                y = math.sin(theta) * spawn_distance
+                particle = np.array([x, y], dtype=np.float16)
             else:  # run next iteration
                 particle = displaced_particle
-        else:
-            # Could not find neighbor in allotted time.
-            return None
 
     def make_fractal(self, N_particles = N_particles, ):
-        for N in tqdm(range(N_particles)):
-            particle, neighbor_index = self.generate_particle()
+        for N in tqdm.tqdm(range(N_particles)):
+            particle, neighbor_index = self.iterate_particle()
             self.particles.append(particle)
             self.tree = cKDTree(self.particles)
             self.connections.append((N+self.num_starters, neighbor_index))
@@ -101,16 +99,24 @@ class DLA2D:
 
         plt.show()
 
-    def plot_positions(self):
+    def plot_particles(self):
+        import matplotlib.pyplot as plt
+        x, y = np.vstack(self.particles).T
+        plt.plot(x, y, "k.", alpha=0.2) 
+        plt.plot(x[:self.num_starters], y[:self.num_starters], "*", markersize=20)
+        # plt.grid()
+        plt.show()
+
+    def plot_connections(self):
         import matplotlib.pyplot as plt
         x, y = np.vstack(self.particles).T
         # plt.plot(x[self.num_starters:], y[self.num_starters:], "o")
-        tqdm.write("Plotting...")
+        tqdm.tqdm.write("Plotting...")
         lines = [(self.particles[par1], self.particles[par2]) for par1, par2 in self.connections]
-        for (x1, y1), (x2, y2) in tqdm(lines):
+        for (x1, y1), (x2, y2) in tqdm.tqdm(lines):
             plt.plot([x1, x2], [y1, y2]) 
         plt.plot(x[:self.num_starters], y[:self.num_starters], "*", markersize=20)
-        plt.grid()
+        # plt.grid()
         plt.show()
 
     def save(self, filename):
@@ -147,10 +153,10 @@ class DLA3D(DLA2D):
     
     def plot_positions(self):
         from mayavi import mlab
-        tqdm.write("Plotting...")
+        tqdm.tqdm.write("Plotting...")
         lines = [(self.particles[par1], self.particles[par2]) for par1, par2 in self.connections]
         x, y, z = np.vstack(self.particles).T
-        for (x1, y1, z1), (x2, y2, z2) in tqdm(lines):
+        for (x1, y1, z1), (x2, y2, z2) in tqdm.tqdm(lines):
             mlab.plot3d([x1, x2], [y1, y2], [z1, z2]) 
         mlab.show()
 
@@ -168,24 +174,34 @@ class MapDLA(DLA2D):
 
     def make_fractal(self, N_particles = N_particles):
         with Pool(self.N_procs) as p:
-            for N in tqdm(range(N_particles)):
+            for N in tqdm.tqdm(range(N_particles)):
                 particle, neighbor_index = self.generate_particle(p)
                 self.particles.append(particle)
                 self.tree = cKDTree(self.particles)
                 self.connections.append((N+1, neighbor_index))
 
-def create_fractal(n_starters = 2, n_particles = 5000):
+def create_fractal(n_starters = 2, n_particles = 5000, force_new = False,
+                   *args, **kwargs):
     filename = f"2d_{n_starters}_{n_particles}.json"
-    if os.path.isfile(filename):
-        tqdm.write("reading from file...")
+    if not force_new and os.path.isfile(filename):
+        tqdm.tqdm.write("reading from file...")
         d = DLA2D.load(filename)
     else:
-        tqdm.write(f"Creating fractal {filename} from scratch")
-        d = DLA2D(n_starters)
+        tqdm.tqdm.write(f"Creating fractal {filename} from scratch")
+        d = DLA2D(n_starters, *args, **kwargs)
         d.make_fractal(n_particles)
         d.save(filename)
     return d
+
+def main():
+    d = create_fractal(1, int(4e4)+1,
+                       R = 1/2,
+                       # force_new = True,
+                       )
+    d.plot_particles()
+    d.plot_mass_distribution(0.06, 0.6)
+
 if __name__ == "__main__":
-    for n_starters in range(2, 5):
-        d = create_fractal(n_starters, 50000)
-        # d.plot_positions()
+    main()
+
+
