@@ -87,7 +87,7 @@ class DLA2D:
                 particle = displaced_particle
 
     def make_fractal(self, N_particles = N_particles, ):
-        for N in tqdm.tqdm(range(N_particles)):
+        for N in tqdm.tqdm(range(N_particles), unit="particles"):
             particle, neighbor_index = self.iterate_particle()
             self.particles.append(particle)
             self.tree = cKDTree(self.particles)
@@ -104,7 +104,7 @@ class DLA2D:
         if isinstance(self.particles, np.ndarray):
             self.particles = self.particles.tolist()
         added_particles = 0
-        progressbar = tqdm.tqdm(total=N_particles)
+        progressbar = tqdm.tqdm(total=N_particles, unit="particles")
         with progressbar:
             while added_particles < N_particles:
                 particles += self.displacement_multiple(bunch_size)
@@ -239,18 +239,16 @@ def create_fractal(n_starters = 2, n_particles = 5000, force_new = False,
     return d
 
 def main(plot = False):
-    # d = create_fractal(1,
-    #                    int(5e3)+5,
-    #                    R = 1/2,
-    #                    # force_new = True,
-    #                    )
-    # d.iterate_multiple(int(2e4 - len(d.particles)), 4000)
-    d = DLA2D.load("2d_1_multi_20008.json")
+    d = create_fractal(1,
+                       int(5e3),
+                       R = 1/2,
+                       )
+    d.iterate_multiple(int(1e5 - len(d.particles)), 1000)
+    filename = f"2d_{d.num_starters}_multi_{len(d.particles)}.json"
+    d.save(filename)
     if plot:
         d.plot_particles()
         d.plot_mass_distribution(0.06, 0.6)
-    filename = f"2d_{d.num_starters}_multi_{len(d.particles)}.json"
-    d.save(filename)
     return d
 
 if __name__ == "__main__":
