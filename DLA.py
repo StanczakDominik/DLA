@@ -11,7 +11,20 @@ import random
 
 N_particles = 5000
 
-dtype = np.float16
+dtype = np.float32
+
+@numba.njit
+def radius(particle):
+    x, y = particle
+    return math.sqrt(x**2 + y**2)
+
+@numba.njit
+def position_on_circle(radius):
+    theta = random.random() * 2 * np.pi
+    x = math.cos(theta) * radius
+    y = math.sin(theta) * radius
+    particle = np.array([x, y], dtype=dtype)
+    return particle
 
 class DLA2D:
     DIM = 2
@@ -20,12 +33,17 @@ class DLA2D:
         return np.random.normal(scale=loc, size=cls.DIM).astype(dtype)
 
     @classmethod
-    def position_on_circle(cls, radius):
-        theta = random.random() * 2 * np.pi
-        x = math.cos(theta) * radius
-        y = math.sin(theta) * radius
-        particle = np.array([x, y], dtype=dtype)
-        return particle
+    def displacement_multiple(cls, N, loc = 1):
+        return np.random.normal(scale=loc, size=(N, cls.DIM)).astype(dtype)
+
+    def position_on_circle(self, N, radius, off_center = True):
+        theta = np.random.random(N) * 2 * np.pi
+        x = np.cos(theta) * radius
+        y = np.sin(theta) * radius
+        new_samples = np.vstack([x, y]).T
+        if off_center:
+            new_samples += np.mean(self.particles, axis=0)
+        return new_samples
 
     def __init__(self, num_starters = 1,
                  R = 1/20,
@@ -47,25 +65,23 @@ class DLA2D:
             self.max_distance = np.linalg.norm(self.particles, axis=1).max()
         self.tree = cKDTree(self.particles)
 
-    def iterate_particle(self,
-                         NT = 100000,
-                         ):
+    def iterate_particle(self):
         spawn_distance = self.max_distance + 5 
-        particle = self.position_on_circle(spawn_distance)
+        particle = position_on_circle(spawn_distance)
 
         while True:
             displaced_particle = particle + self.displacement()
-            particle_radius = (displaced_particle**2).sum()**0.5
+            particle_radius = radius(displaced_particle)
             neighbors = self.tree.query_ball_point(displaced_particle, self.R)
 
             if neighbors:
                 if self.max_distance < particle_radius:
                     self.max_distance = particle_radius
-                neighbor_index = neighbors = [0]
+                neighbor_index = neighbors[0]
                 return displaced_particle, neighbor_index
 
-            elif spawn_distance < particle_radius:
-                particle = self.position_on_circle(spawn_distance)
+            elif spawn_distance + 5 < particle_radius:
+                particle = position_on_circle(spawn_distance)
 
             else:  # run next iteration
                 particle = displaced_particle
@@ -77,16 +93,65 @@ class DLA2D:
             self.tree = cKDTree(self.particles)
             self.connections.append((N+self.num_starters, neighbor_index))
 
+    def iterate_multiple(self, N_particles, bunch_size):
+        print(f"Bunch size is {bunch_size}")
+        self.max_distance = np.max(np.linalg.norm(self.particles, axis=1))
+        spawn_distance = self.max_distance + 5 
+        # particles = np.vstack([position_on_circle(spawn_distance) for _ in range(bunch_size)])
+        particles = self.position_on_circle(bunch_size, spawn_distance)
+        indices = np.arange(bunch_size)
+
+        if isinstance(self.particles, np.ndarray):
+            self.particles = self.particles.tolist()
+        added_particles = 0
+        progressbar = tqdm.tqdm(total=N_particles)
+        with progressbar:
+            while added_particles < N_particles:
+                particles += self.displacement_multiple(bunch_size)
+                particle_radius = np.linalg.norm(particles, axis=1)
+                neighbors = self.tree.query_ball_point(particles, self.R)
+
+                have_neighbors = neighbors.astype(bool)
+                if have_neighbors.any():
+                    # breakpoint()
+                    number_added = have_neighbors.sum()
+                    for i, p, r, n in zip(indices[have_neighbors],
+                                            particles[have_neighbors],
+                                            particle_radius[have_neighbors],
+                                            neighbors[have_neighbors]):
+                        self.particles.append(p)
+                        if self.max_distance < r:
+                            self.max_distance = r
+
+                        spawn_distance = self.max_distance + 5 
+                        particles[i] = position_on_circle(spawn_distance)
+                        for neighbor_index in n:
+                            self.connections.append((len(self.particles) + added_particles, neighbor_index))
+                        added_particles += 1
+                        # progressbar.update(1)
+                    # particles[have_neighbors] = self.position_on_circle(number_added, spawn_distance)
+                    progressbar.update(number_added)
+                    self.tree = cKDTree(self.particles)
+
+                out_of_bounds = (spawn_distance + 5) < particle_radius
+                particles[out_of_bounds] = self.position_on_circle(out_of_bounds.sum(), spawn_distance)
+
+        self.particles = np.array(self.particles)
+
     def plot_mass_distribution(self, Rmin=0.1, Rmax=0.9):
         import matplotlib.pyplot as plt
-        distances = np.linalg.norm(self.particles, axis=1)
-        minimum = -2
+        center = np.mean(self.particles, axis=0)
+        recentered_particles = self.particles - center
+        recentered_tree = cKDTree(recentered_particles)
+        distances = np.linalg.norm(recentered_particles, axis=1)
+        minimum = np.log(distances.min() / 10)
         maximum = np.log(distances.max())
         span = maximum - minimum
         R1 = np.exp(Rmin * span + minimum)
         R2 = np.exp(Rmax * span + minimum)
+        R1, R2 = np.quantile(np.log(distances), [0.01, 0.9999999999])
         Rs = np.logspace(minimum, maximum, 1000)
-        Ns = np.array([len(self.tree.query_ball_point(np.zeros(self.DIM), R)) for R in Rs])
+        Ns = np.array([len(recentered_tree.query_ball_point(center, R)) for R in Rs])
         indices = (R1 < Rs) & (Rs < R2)
         plt.loglog(Rs, Ns)
         a_fit, b_fit = np.polyfit(np.log(Rs[indices]), np.log(Ns[indices]), 1)
@@ -141,28 +206,6 @@ class DLA2D:
         dla.tree = cKDTree(dla.particles)
         return dla
 
-class DLA3D(DLA2D):
-    DIM=3
-    @classmethod
-    def displacement(cls, loc = 3, scale=1/10):
-        distance = np.abs(np.random.normal(loc=loc, scale=scale))
-        theta= np.random.random()*2*np.pi
-        phi = np.random.random() * np.pi    
-        x = np.cos(theta) * np.sin(phi) * distance
-        y = np.sin(theta) * np.sin(phi) * distance
-        z = np.cos(phi) * distance
-        return np.array([x, y, z])
-    
-    def plot_positions(self):
-        from mayavi import mlab
-        tqdm.tqdm.write("Plotting...")
-        lines = [(self.particles[par1], self.particles[par2]) for par1, par2 in self.connections]
-        x, y, z = np.vstack(self.particles).T
-        for (x1, y1, z1), (x2, y2, z2) in tqdm.tqdm(lines):
-            mlab.plot3d([x1, x2], [y1, y2], [z1, z2]) 
-        mlab.show()
-
-
 class MapDLA(DLA2D):
     def __init__(self, N_procs):
         super().__init__()
@@ -196,13 +239,19 @@ def create_fractal(n_starters = 2, n_particles = 5000, force_new = False,
     return d
 
 def main(plot = False):
-    d = create_fractal(1, int(5e3)+3,
-                       R = 1/2,
-                       # force_new = True,
-                       )
+    # d = create_fractal(1,
+    #                    int(5e3)+5,
+    #                    R = 1/2,
+    #                    # force_new = True,
+    #                    )
+    # d.iterate_multiple(int(2e4 - len(d.particles)), 4000)
+    d = DLA2D.load("2d_1_multi_20008.json")
     if plot:
         d.plot_particles()
         d.plot_mass_distribution(0.06, 0.6)
+    filename = f"2d_{d.num_starters}_multi_{len(d.particles)}.json"
+    d.save(filename)
+    return d
 
 if __name__ == "__main__":
     main(True)
