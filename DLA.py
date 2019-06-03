@@ -100,7 +100,6 @@ class DLA2D:
             self.tree = cKDTree(self.particles)
 
     def iterate_multiple(self, N_particles, bunch_size):
-        print(f"Bunch size is {bunch_size}")
         self.max_distance = np.max(np.linalg.norm(self.particles, axis=1))
         spawn_distance = self.max_distance + 5 
         particles = self.position_on_circle(bunch_size, spawn_distance)
@@ -112,6 +111,7 @@ class DLA2D:
         progressbar = tqdm.tqdm(total=N_particles, unit="particles")
         with progressbar:
             while added_particles < N_particles:
+                progressbar.set_postfix(**{"Bunch size": bunch_size})
                 particles += self.displacement_multiple(bunch_size)
                 particle_radius = np.linalg.norm(particles, axis=1)
                 neighbors = self.tree.query_ball_point(particles, self.R)
@@ -156,7 +156,7 @@ class DLA2D:
                 dN = final_N_particles - self.N_particles
                 bunch_size = int(self.N_particles**0.75)
                 num_particles_for_iteration = 100 * bunch_size if 100 * bunch_size < dN else dN
-                print(f"Currently at {self.N_particles}, going up to {num_particles_for_iteration} with bunch size {bunch_size}")
+                tqdm.tqdm.write(f"Currently at {self.N_particles}, going up to {num_particles_for_iteration} with bunch size {bunch_size}")
                 self.iterate_multiple(num_particles_for_iteration, bunch_size)
             except KeyboardInterrupt:
                 break
@@ -238,7 +238,7 @@ class DLA2D:
                        *args, **kwargs):
         filename = f"2d_{n_starters}_{n_particles}.json"
         if not force_new and os.path.isfile(filename):
-            tqdm.tqdm.write("reading from file {filename}...")
+            tqdm.tqdm.write(f"reading from file {filename}...")
             d = cls.load(filename)
         else:
             tqdm.tqdm.write(f"Creating fractal {filename} from scratch")
@@ -247,24 +247,26 @@ class DLA2D:
             d.save(filename)
         return d
 
-def main(plot = False):
+def plot_all(directory = "."):
     import glob
-    for filename in glob.glob("*.json"):
+    for filename in glob.glob(os.path.join(directory, "*.json")):
         d = DLA2D.load(filename)
         # fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 12))
         d.plot_particles(filename.replace(".json", "_particles.png"))
         d.plot_mass_distribution(filename.replace(".json", "_distribution.png"))
         # fig.savefig(dpi=600, fname=filename.replace("json", "png"))
 
-    exit()
-    for seeds in tqdm.trange(1, 5):
-        d = DLA2D.create_fractal(seeds,
-                                 int(5e3),
+def main(plot = False):
+    for seed in tqdm.trange(10):
+        np.random.seed(seed)
+        d = DLA2D.create_fractal(1,
+                                 int(1e3),
                                  R = 1/2,
+                                 force_new = True
                                  )
-        d.make_in_steps(1e5)
-        filename = d.save()
-        # d = DLA2D.load("2d_1_multi_100000.json")
+        d.make_in_steps(1e4)
+        filename = f"2d_seed_{seed}_{len(d.particles)}.json"
+        filename = d.save(filename)
         if plot:
             d.plot_particles(filename.replace(".json", "_particles.png"))
             d.plot_mass_distribution(filename.replace(".json", "_distribution.png"))
