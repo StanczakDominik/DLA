@@ -1,17 +1,17 @@
 import numpy as np
 from scipy.spatial import cKDTree
 import tqdm
-import random
-from multiprocessing import Pool
 import json
 import os
 import numba
 import math
 import random
+from textwrap import dedent
+import matplotlib.pyplot as plt
+import inspect
 
-N_particles = 5000
 
-dtype = np.float32
+DTYPE = np.float32
 
 @numba.njit
 def radius(particle):
@@ -23,18 +23,18 @@ def position_on_circle(radius):
     theta = random.random() * 2 * np.pi
     x = math.cos(theta) * radius
     y = math.sin(theta) * radius
-    particle = np.array([x, y], dtype=dtype)
+    particle = np.array([x, y], dtype=DTYPE)
     return particle
 
 class DLA2D:
     DIM = 2
     @classmethod
     def displacement(cls, loc = 1):
-        return np.random.normal(scale=loc, size=cls.DIM).astype(dtype)
+        return np.random.normal(scale=loc, size=cls.DIM).astype(DTYPE)
 
     @classmethod
     def displacement_multiple(cls, N, loc = 1):
-        return np.random.normal(scale=loc, size=(N, cls.DIM)).astype(dtype)
+        return np.random.normal(scale=loc, size=(N, cls.DIM)).astype(DTYPE)
 
     def position_on_circle(self, N, radius, off_center = True):
         theta = np.random.random(N) * 2 * np.pi
@@ -45,16 +45,12 @@ class DLA2D:
             new_samples += np.mean(self.particles, axis=0)
         return new_samples
 
-    def __init__(self, num_starters = 1,
+    def __init__(self,
+                 num_starters = 1,
                  R = 1/20,
-                 Rmin = 1.2,
-                 Rmax = 30
                  ):
         self.num_starters = num_starters
-        self.connections = []
         self.R = R
-        self.Rmin = Rmin
-        self.Rmax = Rmax
 
         if num_starters == 1:
             self.particles = [np.zeros(self.DIM)]
@@ -64,6 +60,17 @@ class DLA2D:
                                                    size=(num_starters, self.DIM)))
             self.max_distance = np.linalg.norm(self.particles, axis=1).max()
         self.tree = cKDTree(self.particles)
+
+    @property
+    def N_particles(self):
+        return len(self.particles)
+
+    @property
+    def description(self):
+        desc = f"""DLA with {self.N_particles}, starting from {self.num_starters} seeds
+                   Particle interaction distance: {self.R:.2e} 
+                   """
+        return "\n".join([x.strip() for x in desc.splitlines()])
 
     def iterate_particle(self):
         spawn_distance = self.max_distance + 5 
@@ -86,18 +93,16 @@ class DLA2D:
             else:  # run next iteration
                 particle = displaced_particle
 
-    def make_fractal(self, N_particles = N_particles, ):
+    def make_fractal(self, N_particles):
         for N in tqdm.tqdm(range(N_particles), unit="particles"):
             particle, neighbor_index = self.iterate_particle()
             self.particles.append(particle)
             self.tree = cKDTree(self.particles)
-            self.connections.append((N+self.num_starters, neighbor_index))
 
     def iterate_multiple(self, N_particles, bunch_size):
         print(f"Bunch size is {bunch_size}")
         self.max_distance = np.max(np.linalg.norm(self.particles, axis=1))
         spawn_distance = self.max_distance + 5 
-        # particles = np.vstack([position_on_circle(spawn_distance) for _ in range(bunch_size)])
         particles = self.position_on_circle(bunch_size, spawn_distance)
         indices = np.arange(bunch_size)
 
@@ -115,21 +120,28 @@ class DLA2D:
                 if have_neighbors.any():
                     # breakpoint()
                     number_added = have_neighbors.sum()
-                    for i, p, r, n in zip(indices[have_neighbors],
-                                            particles[have_neighbors],
-                                            particle_radius[have_neighbors],
-                                            neighbors[have_neighbors]):
-                        self.particles.append(p)
-                        if self.max_distance < r:
-                            self.max_distance = r
+                    # for i, p, r, n in zip(indices[have_neighbors],
+                    #                       particles[have_neighbors],
+                    #                       particle_radius[have_neighbors],
+                    #                       neighbors[have_neighbors]):
+                    #     self.particles.append(p)
+                    #     if self.max_distance < r:
+                    #         self.max_distance = r
 
-                        spawn_distance = self.max_distance + 5 
-                        particles[i] = position_on_circle(spawn_distance)
-                        for neighbor_index in n:
-                            self.connections.append((len(self.particles) + added_particles, neighbor_index))
-                        added_particles += 1
-                        # progressbar.update(1)
-                    # particles[have_neighbors] = self.position_on_circle(number_added, spawn_distance)
+                    #     spawn_distance = self.max_distance + 5 
+                    #     particles[i] = position_on_circle(spawn_distance)
+                    #     added_particles += 1
+                    #     # progressbar.update(1)
+
+                    self.particles.extend(particles[have_neighbors].tolist())
+                    rmax = particle_radius[have_neighbors].max()
+                    if self.max_distance < rmax:
+                        self.max_distance = rmax
+                        spawn_distance = self.max_distance + 5
+
+                    particles[have_neighbors] = self.position_on_circle(number_added, spawn_distance)
+                    added_particles += number_added
+
                     progressbar.update(number_added)
                     self.tree = cKDTree(self.particles)
 
@@ -138,120 +150,127 @@ class DLA2D:
 
         self.particles = np.array(self.particles)
 
-    def plot_mass_distribution(self, Rmin=0.1, Rmax=0.9):
-        import matplotlib.pyplot as plt
+    def make_in_steps(self, final_N_particles):
+        while self.N_particles < final_N_particles:
+            try:
+                dN = final_N_particles - self.N_particles
+                bunch_size = int(self.N_particles**0.75)
+                num_particles_for_iteration = 100 * bunch_size if 100 * bunch_size < dN else dN
+                print(f"Currently at {self.N_particles}, going up to {num_particles_for_iteration} with bunch size {bunch_size}")
+                self.iterate_multiple(num_particles_for_iteration, bunch_size)
+            except KeyboardInterrupt:
+                break
+
+    def plot_mass_distribution(self, filename = None, ax = None):
+        if ax is None:
+            fig, ax = plt.subplots()
+
         center = np.mean(self.particles, axis=0)
         recentered_particles = self.particles - center
         recentered_tree = cKDTree(recentered_particles)
         distances = np.linalg.norm(recentered_particles, axis=1)
-        minimum = np.log(distances.min() / 10)
-        maximum = np.log(distances.max())
-        span = maximum - minimum
-        R1 = np.exp(Rmin * span + minimum)
-        R2 = np.exp(Rmax * span + minimum)
-        R1, R2 = np.quantile(np.log(distances), [0.01, 0.9999999999])
-        Rs = np.logspace(minimum, maximum, 1000)
+        minimum, maximum = np.quantile(distances, [0.01, 0.6])
+        Rs = np.logspace(np.log10(distances.min()), np.log10(distances.max()), 10000)
         Ns = np.array([len(recentered_tree.query_ball_point(center, R)) for R in Rs])
-        indices = (R1 < Rs) & (Rs < R2)
-        plt.loglog(Rs, Ns)
-        a_fit, b_fit = np.polyfit(np.log(Rs[indices]), np.log(Ns[indices]), 1)
-        title = f"Estimated dimension: {a_fit:.3f}"
-        plt.title(title)
-        plt.loglog(Rs[indices], Ns[indices], "r", label=title)
-        plt.axvline(R1, color='r', linestyle="--")
-        plt.axvline(R2, color='r', linestyle="--")
-        plt.legend(loc='best')
-        plt.xlabel("Radius R")
-        plt.ylabel("Number of particles within R")
+        indices = (minimum < Rs) & (Rs < maximum)
+        ax.loglog(Rs, Ns)
+        (a_fit, b_fit), cov = np.polyfit(np.log10(Rs[indices]), np.log10(Ns[indices]), 1, cov=True)
+        std_a = cov[0,0]**0.5
+        title = fr"Estimated dimension: ${a_fit:.2f} \pm {std_a:.2f}$"
+        ax.set_title(title)
+        ax.loglog(Rs[indices], Ns[indices], "r", label=title)
+        ax.axvline(minimum, color='r', linestyle="--")
+        ax.axvline(maximum, color='r', linestyle="--")
+        ax.legend(loc='best')
+        ax.set_xlabel("Radius R")
+        ax.set_ylabel("Number of particles within R")
+        if filename is not None:
+            plt.savefig(filename)
+            plt.close()
+        else:
+            plt.show()
 
-        plt.show()
-
-    def plot_particles(self):
-        import matplotlib.pyplot as plt
+    def plot_particles(self, filename = None, ax = None):
+        if ax is None:
+            fig, ax = plt.subplots(
+                figsize=(16, 12),
+            )
         x, y = np.vstack(self.particles).T
-        plt.plot(x, y, "k.", alpha=0.2) 
-        plt.plot(x[:self.num_starters], y[:self.num_starters], "*", markersize=20)
-        # plt.grid()
-        plt.show()
+        r = range(len(y))
+        plt.style.use('dark_background')
+        points = ax.scatter(x, y, c = r, marker='.', s=1, cmap='Blues', alpha=0.6) 
+        cbar = plt.colorbar(points)
+        cbar.ax.set_ylabel('Time of arrival', rotation=270)
+        ax.plot(x[:self.num_starters], y[:self.num_starters], "*", markersize=20)
+        ax.set_xlabel("x position")
+        ax.set_ylabel("y position")
+        ax.set_title(self.description)
+        if filename is not None:
+            plt.savefig(filename, dpi=400)
+            plt.close()
+        else:
+            plt.show()
 
-    def plot_connections(self):
-        import matplotlib.pyplot as plt
-        x, y = np.vstack(self.particles).T
-        # plt.plot(x[self.num_starters:], y[self.num_starters:], "o")
-        tqdm.tqdm.write("Plotting...")
-        lines = [(self.particles[par1], self.particles[par2]) for par1, par2 in self.connections]
-        for (x1, y1), (x2, y2) in tqdm.tqdm(lines):
-            plt.plot([x1, x2], [y1, y2]) 
-        plt.plot(x[:self.num_starters], y[:self.num_starters], "*", markersize=20)
-        # plt.grid()
-        plt.show()
+    def save(self, filename = None):
+        if filename is None:
+            filename = f"2d_{self.num_starters}_{len(self.particles)}.json"
 
-    def save(self, filename):
         with open(filename, "w") as f:
             d = dict(particles=np.vstack(self.particles).tolist(),
-                     connections=self.connections,
                      num_starters = self.num_starters,
                      R=self.R,
-                     Rmin=self.Rmin,
-                     Rmax=self.Rmax)
+                     code=inspect.getsource(inspect.getmodule(inspect.currentframe())),
+                     )
             json.dump(d, f)
+        return filename
 
     @classmethod
     def load(cls, filename):
         with open(filename, "r") as f:
             d = json.load(f)
-        dla = cls(d['num_starters'], d['R'], d['Rmin'], d['Rmax'])
+        dla = cls(d['num_starters'], d['R'])
         dla.particles = np.array(d['particles'])
-        dla.connections = d['connections']
         dla.tree = cKDTree(dla.particles)
         return dla
 
-class MapDLA(DLA2D):
-    def __init__(self, N_procs):
-        super().__init__()
-        self.N_procs = N_procs
-
-    def generate_particle(self, pool):
-        while True:
-            particles = list(filter(None, pool.map(self.iterate_particle, range(pool._processes))))
-            if len(particles):
-                return random.choice(particles)
-
-    def make_fractal(self, N_particles = N_particles):
-        with Pool(self.N_procs) as p:
-            for N in tqdm.tqdm(range(N_particles)):
-                particle, neighbor_index = self.generate_particle(p)
-                self.particles.append(particle)
-                self.tree = cKDTree(self.particles)
-                self.connections.append((N+1, neighbor_index))
-
-def create_fractal(n_starters = 2, n_particles = 5000, force_new = False,
-                   *args, **kwargs):
-    filename = f"2d_{n_starters}_{n_particles}.json"
-    if not force_new and os.path.isfile(filename):
-        tqdm.tqdm.write("reading from file...")
-        d = DLA2D.load(filename)
-    else:
-        tqdm.tqdm.write(f"Creating fractal {filename} from scratch")
-        d = DLA2D(n_starters, *args, **kwargs)
-        d.make_fractal(n_particles)
-        d.save(filename)
-    return d
+    @classmethod
+    def create_fractal(cls, n_starters = 2, n_particles = 5000, force_new = False,
+                       *args, **kwargs):
+        filename = f"2d_{n_starters}_{n_particles}.json"
+        if not force_new and os.path.isfile(filename):
+            tqdm.tqdm.write("reading from file {filename}...")
+            d = cls.load(filename)
+        else:
+            tqdm.tqdm.write(f"Creating fractal {filename} from scratch")
+            d = cls(n_starters, *args, **kwargs)
+            d.make_fractal(n_particles)
+            d.save(filename)
+        return d
 
 def main(plot = False):
-    d = create_fractal(1,
-                       int(5e3),
-                       R = 1/2,
-                       )
-    d.iterate_multiple(int(1e5 - len(d.particles)), 1000)
-    filename = f"2d_{d.num_starters}_multi_{len(d.particles)}.json"
-    d.save(filename)
-    if plot:
-        d.plot_particles()
-        d.plot_mass_distribution(0.06, 0.6)
+    import glob
+    for filename in glob.glob("*.json"):
+        d = DLA2D.load(filename)
+        # fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 12))
+        d.plot_particles(filename.replace(".json", "_particles.png"))
+        d.plot_mass_distribution(filename.replace(".json", "_distribution.png"))
+        # fig.savefig(dpi=600, fname=filename.replace("json", "png"))
+
+    exit()
+    for seeds in tqdm.trange(1, 5):
+        d = DLA2D.create_fractal(seeds,
+                                 int(5e3),
+                                 R = 1/2,
+                                 )
+        d.make_in_steps(1e5)
+        filename = d.save()
+        # d = DLA2D.load("2d_1_multi_100000.json")
+        if plot:
+            d.plot_particles(filename.replace(".json", "_particles.png"))
+            d.plot_mass_distribution(filename.replace(".json", "_distribution.png"))
     return d
 
 if __name__ == "__main__":
-    main(True)
+    d = main(True)
 
 
