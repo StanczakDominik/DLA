@@ -10,6 +10,7 @@ from textwrap import dedent
 import matplotlib.pyplot as plt
 import inspect
 import pandas
+from multiprocessing import Pool
 
 DTYPE = np.float32
 
@@ -299,18 +300,19 @@ def plot_all(directory = "."):
         d.plot_mass_distribution(filename.replace(".json", "_distribution.png"))
         # fig.savefig(dpi=600, fname=filename.replace("json", "png"))
 
-def plot_all_dimensions(directory = "."):
+def plot_all_dimensions(directory = ".", x= (5, 80)):
+    
     import glob
     fractals = []
 
-    for filename in tqdm.tqdm(glob.glob(os.path.join(directory, "*.json"))):
+    for filename in glob.glob(os.path.join(directory, "*.json")):
         d = DLA2D.load(filename)
         if d.N_particles >= 1e5:
             fractals.append(d)
 
     global_min_distance = np.inf
     global_max_distance = -np.inf
-    for fractal in tqdm.tqdm(fractals):
+    for fractal in fractals:
         distances = fractal.get_off_center_distances()
         min_distance = distances.min()
         if min_distance < global_min_distance:
@@ -322,44 +324,16 @@ def plot_all_dimensions(directory = "."):
     dataframes = []
     for fractal in tqdm.tqdm(fractals):
         Rs, Ns = fractal.plot_mass_distribution(min_distance=global_min_distance,
-                                       max_distance=global_max_distance,
+                                                max_distance=global_max_distance,
+                                                plot=False,
                                        )
         dataframes.append(pandas.DataFrame({"R": Rs, "N": Ns}))
-    return dataframes
-
-
-
-
-def main(plot = False, initsize=int(5e3), gotosize=[int(1e4)], bunchexponent=0.5):
-    with tqdm.trange(0, 10) as progressbar:
-        for seed in progressbar:
-            np.random.seed(seed)
-            progressbar.set_postfix(seed=seed)
-            d = DLA2D.create_fractal(1,
-                                     int(initsize),
-                                     R = 1/2,
-                                     force_new = False
-                                     )
-            for uptosize in gotosize:
-                d.make_in_steps(int(uptosize), bunchexponent)
-                filename = f"2d_seed_{seed}_{len(d.particles)}.json"
-                filename = d.save(filename)
-                if plot:
-                    d.plot_particles(filename.replace(".json", "_particles.png"))
-                    d.plot_mass_distribution(filename.replace(".json", "_distribution.png"))
-    return d
-
-if __name__ == "__main__":
-    main(True, initsize=5e3, gotosize = [1e4, 5e4, 1e5])
-    dimensions = plot_all_dimensions()
-    meandf = sum(dimensions) / len(dimensions)
-    off_center_dimensions = [(df - meandf)**2 for df in dimensions]
-    stddf = np.sqrt(sum(off_center_dimensions)) / len(dimensions)
+    meandf = sum(dataframes) / len(dataframes)
+    off_center_dataframes = [(df - meandf)**2 for df in dataframes]
+    stddf = np.sqrt(sum(off_center_dataframes)) / len(dataframes)
     # meandf.plot('R', 'N', logy=True, logx=True)
     # plt.show()
 
-    x= (0.5, 80)
-    print(x)
     xmin, xmax = x
     indices = (xmin < meandf['R']) & (meandf['R'] < xmax)
     middle = meandf[indices]
@@ -367,19 +341,46 @@ if __name__ == "__main__":
     (a, b), cov = np.polyfit(np.log10(middle['R']),
                              np.log10(middle['N']),
                              1,
-                             w = 1/np.log10(middlestd['N']),
                              cov=True)
     stda = cov[0,0]**0.5
     meandf['Nfit'] = 10**np.polyval((a, b), np.log10(meandf['R']))
     fig, ax = plt.subplots()
-    meandf.plot('R', 'N', logx=True, logy=True, ax=ax)
+    meandf.plot('R', 'N', logx=True, logy=True, ax=ax, label="<N>")
     meandf.plot('R', 'Nfit', logx=True, logy=True, ax=ax)
-    ax.set_title(fr"y = {a:.4f} $\pm$ {stda:.3f}")
+    ax.set_title(fr"a = {a:.5f} $\pm$ {stda:.4f}")
     ax.axvline(xmin)
     ax.axvline(xmax)
-    for seed, df in enumerate(dimensions):
+    for seed, df in enumerate(dataframes):
         df.plot('R', 'N', logx=True, logy=True, ax=ax, alpha=0.1, label=f"Seed: {seed}")
+    plt.savefig("full_plot.png")
     plt.show()
 
+    return dataframes
+
+
+
+def main_single(seed, plot=False, initsize=int(5e3), gotosize = [1e4, 5e4, 1e5], bunchexponent=0.5):
+    np.random.seed(seed)
+    d = DLA2D.create_fractal(1,
+                             int(initsize),
+                             R = 1/2,
+                             force_new = True,
+                             )
+    for uptosize in gotosize:
+        d.make_in_steps(int(uptosize), bunchexponent)
+        filename = f"2d_seed_{seed}_{len(d.particles)}.json"
+        filename = d.save(filename)
+        if plot:
+            d.plot_particles(filename.replace(".json", "_particles.png"))
+            d.plot_mass_distribution(filename.replace(".json", "_distribution.png"))
+    return d
+
+def main(plot = False, initsize=int(5e3), gotosize=[int(1e4)], bunchexponent=0.5):
+   with Pool(3) as p:
+      r = list(tqdm.tqdm(p.imap(main_single, range(22, 37)), total=15))
+
+if __name__ == "__main__":
+    # main(True, initsize=5e3, gotosize = [1e4, 5e4, 1e5])
+    plot_all_dimensions(x=(2, 180))
 
 
