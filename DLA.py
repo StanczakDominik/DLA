@@ -155,17 +155,16 @@ class DLA2D:
         return full_num_steps
         
 
-    def make_in_steps(self, final_N_particles, bunchexponent = 0.75):
+    def make_in_steps(self, final_N_particles, bunchexponent = 0.5):
         while self.N_particles < final_N_particles:
             try:
                 dN = final_N_particles - self.N_particles
-                bunch_size = int(self.N_particles**0.75)
+                bunch_size = int(self.N_particles**bunchexponent)
                 num_particles_for_iteration = 100 * bunch_size if (100 * bunch_size) < dN else dN
                 tqdm.tqdm.write(f"Currently at {self.N_particles}, going up to {num_particles_for_iteration + dN} with bunch size {bunch_size}")
                 self.iterate_multiple(num_particles_for_iteration + self.N_particles, bunch_size)
             except KeyboardInterrupt:
                 break
-
 
     def get_off_center_distances(self, center = None):
         if center is None:
@@ -323,7 +322,7 @@ def plot_all_dimensions(directory = "."):
 
 
 def main(plot = False, initsize=int(5e3), gotosize=[int(1e4)], bunchexponent=0.5):
-    with tqdm.trange(0, 3) as progressbar:
+    with tqdm.trange(0, 10) as progressbar:
         for seed in progressbar:
             np.random.seed(seed)
             progressbar.set_postfix(seed=seed)
@@ -342,7 +341,7 @@ def main(plot = False, initsize=int(5e3), gotosize=[int(1e4)], bunchexponent=0.5
     return d
 
 if __name__ == "__main__":
-    main(True, initsize=5e4, gotosize = [5e5])
+    main(True, initsize=5e4, gotosize = [1e5, 5e5])
     dimensions = plot_all_dimensions()
     meandf = sum(dimensions) / len(dimensions)
     off_center_dimensions = [(df - meandf)**2 for df in dimensions]
@@ -372,5 +371,6 @@ if __name__ == "__main__":
     for seed, df in enumerate(dimensions):
         df.plot('R', 'N', logx=True, logy=True, ax=ax, alpha=0.1, label=f"Seed: {seed}")
     plt.show()
+
 
 
