@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 import inspect
 import pandas
 
-
 DTYPE = np.float32
 
 @numba.njit
@@ -31,11 +30,19 @@ class DLA2D:
     DIM = 2
     @classmethod
     def displacement(cls, loc = 1):
-        return np.random.normal(scale=loc, size=cls.DIM).astype(DTYPE)
+        theta = random.random() * 2 * np.pi
+        x = math.cos(theta) * loc
+        y = math.sin(theta) * loc
+        particle = np.array([x, y], dtype=DTYPE)
+        return particle
 
     @classmethod
     def displacement_multiple(cls, N, loc = 1):
-        return np.random.normal(scale=loc.reshape(N, 1), size=(N, cls.DIM)).astype(DTYPE)
+        theta = np.random.random(N) * 2 * np.pi
+        x = np.cos(theta) * loc
+        y = np.sin(theta) * loc
+        particle = np.vstack([x,y]).T
+        return particle
 
     def position_on_circle(self, N, radius, off_center = True):
         theta = np.random.random(N) * 2 * np.pi
@@ -80,10 +87,10 @@ class DLA2D:
 
         while True:
             distance, _ = self.tree.query(particle, 1)
-            if distance < (self.R * 3):
-                step_size = self. R / 2
+            if distance < (self.R * 2):
+                step_size = self.R * 0.75
             else:
-                step_size = distance / 2
+                step_size = distance * 0.75
 
             displaced_particle = particle + self.displacement(step_size)
             particle_radius = radius(displaced_particle)
@@ -122,8 +129,8 @@ class DLA2D:
         with progressbar:
             while self.N_particles < N_particles:
                 distances, _ = self.tree.query(particles, 1)
-                step_size = distances / 2
-                step_size[distances < (self.R * 3)] = self.R / 2
+                step_size = distances * 0.75
+                step_size[distances < (self.R * 2)] = self.R * 0.75
                 progressbar.set_postfix(**{"r0": distances[0], "n0": num_steps[0], "step": step_size[0]})
                 particles += self.displacement_multiple(bunch_size, step_size)
                 num_steps += 1
@@ -163,6 +170,8 @@ class DLA2D:
                 num_particles_for_iteration = 100 * bunch_size if (100 * bunch_size) < dN else dN
                 tqdm.tqdm.write(f"Currently at {self.N_particles}, going up to {num_particles_for_iteration + dN} with bunch size {bunch_size}")
                 self.iterate_multiple(num_particles_for_iteration + self.N_particles, bunch_size)
+                self.save()
+
             except KeyboardInterrupt:
                 break
 
@@ -341,7 +350,7 @@ def main(plot = False, initsize=int(5e3), gotosize=[int(1e4)], bunchexponent=0.5
     return d
 
 if __name__ == "__main__":
-    main(True, initsize=5e4, gotosize = [1e5, 5e5])
+    main(True, initsize=5e3, gotosize = [1e4, 5e4, 1e5])
     dimensions = plot_all_dimensions()
     meandf = sum(dimensions) / len(dimensions)
     off_center_dimensions = [(df - meandf)**2 for df in dimensions]
