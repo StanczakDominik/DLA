@@ -293,7 +293,7 @@ class DLA2D:
 
 def plot_all(directory = "."):
     import glob
-    for filename in glob.glob(os.path.join(directory, "*.json")):
+    for filename in tqdm.tqdm(glob.glob(os.path.join(directory, "*.json"))):
         d = DLA2D.load(filename)
         # fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 12))
         d.plot_particles(filename.replace(".json", "_particles.png"))
@@ -380,7 +380,8 @@ def main(plot = False, initsize=int(5e3), gotosize=[int(1e4)], bunchexponent=0.5
       r = list(tqdm.tqdm(p.imap(main_single, range(22, 37)), total=15))
 
 if __name__ == "__main__":
-    # main(True, initsize=5e3, gotosize = [1e4, 5e4, 1e5])
+    main()
+    plot_all()
     plot_all_dimensions(x=(2, 180))
 
 
