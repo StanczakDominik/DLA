@@ -25,6 +25,15 @@ def position_on_circle(radius):
     particle = np.array([x, y], dtype=DTYPE)
     return particle
 
+@numba.vectorize
+def calculate_step_size(distance, R):
+    if distance < (R * 3):
+        step_size = R * 0.75
+    elif distance < (R * 6):
+        step_size = R * 1.2
+    else:
+        step_size = distance * 0.75
+    return step_size
 
 class DLA2D:
     DIM = 2
@@ -87,12 +96,7 @@ class DLA2D:
 
         while True:
             distance, _ = self.tree.query(particle, 1)
-            if distance < (self.R * 3):
-                step_size = self.R * 0.75
-            elif distance < (self.R * 6):
-                step_size = self.R * 1.2
-            else:
-                step_size = distance * 0.75
+            step_size = calculate_step_size(distance, self.R)
 
             displaced_particle = particle + self.displacement(step_size)
             particle_radius = radius(displaced_particle)
@@ -109,12 +113,6 @@ class DLA2D:
 
             else:  # run next iteration
                 particle = displaced_particle
-
-    def make_fractal(self, N_particles):
-        for N in tqdm.tqdm(range(N_particles), unit="particles"):
-            particle, neighbor_index = self.iterate_particle()
-            self.particles.append(particle)
-            self.tree = cKDTree(self.particles)
 
     def iterate_multiple(self, N_particles, bunch_size, progressbar=None):
         self.max_distance = np.max(np.linalg.norm(self.particles, axis=1))
@@ -137,8 +135,8 @@ class DLA2D:
 
         while self.N_particles < N_particles:
             distances, _ = self.tree.query(particles, 1)
-            step_size = distances * 0.75
-            step_size[distances < (self.R * 2)] = self.R * 0.75
+            step_size = calculate_step_size(distances, self.R)
+
             progressbar.set_postfix(
                 **{"r0": distances[0], "n0": num_steps[0], "step": step_size[0]}
             )
@@ -297,6 +295,12 @@ class DLA2D:
             json.dump(d, f)
         return filename
 
+    def make_fractal(self, N_particles):
+        for N in tqdm.tqdm(range(N_particles), unit="particles"):
+            particle, neighbor_index = self.iterate_particle()
+            self.particles.append(particle)
+            self.tree = cKDTree(self.particles)
+
     @classmethod
     def load(cls, filename):
         with open(filename, "r") as f:
@@ -350,4 +354,6 @@ def main(plot=False, initsize=int(5e3), gotosize=[int(1e4)], bunchexponent=0.5):
 
 
 if __name__ == "__main__":
-    main_single(1)
+    d = main_single(1, gotosize=[1e4, 5e4])
+    d.plot_particles()
+    d.plot_mass_distribution()
