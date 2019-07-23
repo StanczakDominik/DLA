@@ -7,11 +7,19 @@ https://github.com/pypa/sampleproject
 
 from setuptools import setup, find_packages
 from os import path
+from itertools import chain
 here = path.abspath(path.dirname(__file__))
 
 # Get the long description from the README file
 with open(path.join(here, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
+
+extras_require={
+    'test': ['coverage', 'pytest'],
+    'dev': ['asv'],
+}
+
+extras_require['all'] = list(set(chain(*extras_require.values())))
 
 setup(
     name='DLA',
@@ -30,12 +38,10 @@ setup(
         'Programming Language :: Python :: 3.7',
     ],
     keywords='diffusion-limited-aggregation simulation',
-    packages=find_packages(exclude=['docs', 'tests']),
+    packages=find_packages(exclude=['docs', 'tests', 'benchmarks']),
     python_requires='>=3.6',
     install_requires=['numpy', 'scipy', 'tqdm', 'numba', 'matplotlib', 'pandas'],
-    extras_require={
-        'test': ['coverage', 'pytest'],
-    },
+    extras_require=extras_require,
 
     # To provide executable scripts, use entry points in preference to the
     # "scripts" keyword. Entry points provide cross-platform support and allow
